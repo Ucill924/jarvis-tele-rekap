@@ -1,0 +1,125 @@
+import json
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+import pytz
+
+# Fungsi untuk memuat data dari file JSON
+def load_data():
+    try:
+        with open('categories_data.json', 'r') as f:
+            categories_data = json.load(f)
+    except FileNotFoundError:
+        categories_data = {}
+    return categories_data
+
+def save_data(categories_data):
+    with open('categories_data.json', 'w') as f:
+        json.dump(categories_data, f, indent=4)
+
+def escape_markdown_v2(text):
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'  # Tambahkan titik (.)
+    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
+
+# Load data saat bot dimulai
+categories_data = load_data()
+
+# Fungsi untuk menambahkan kategori baru
+async def jarvis_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 3:
+        await update.message.reply_text("Perintah tidak lengkap. Format yang benar: /jarvis_add [kategori] [nama] [link]")
+        return
+
+    category = context.args[0].lower()
+    name = context.args[1]
+    link = context.args[2]
+
+    # Jika kategori belum ada, buat kategori baru
+    if category not in categories_data:
+        categories_data[category] = []
+
+    # Tambahkan data ke kategori
+    categories_data[category].append({"name": name, "link": link})
+    save_data(categories_data)
+
+    await update.message.reply_text(f"{name} telah ditambahkan ke daftar {category.capitalize()}.")
+
+# Fungsi untuk menghapus item dari kategori
+async def jarvis_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("Perintah tidak lengkap. Format yang benar: /jarvis_remove [kategori] [nama]")
+        return
+
+    category = context.args[0].lower()  # Ambil kategori yang diminta (misal: testnet)
+    name = context.args[1]  # Ambil nama item yang ingin dihapus (misal: reza_silet_ireng)
+
+    # Cek apakah kategori ada
+    if category not in categories_data:
+        await update.message.reply_text(f"Kategori '{category}' tidak ditemukan.")
+        return
+
+    # Cari item yang ingin dihapus
+    item_to_remove = None
+    for item in categories_data[category]:
+        if item['name'].lower() == name.lower():  # Cek nama item secara case-insensitive
+            item_to_remove = item
+            break
+
+    if item_to_remove:
+        categories_data[category].remove(item_to_remove)  # Hapus item dari kategori
+        save_data(categories_data)  # Simpan data yang telah diperbarui
+        await update.message.reply_text(f"{name} telah dihapus dari kategori {category.capitalize()}.")
+    else:
+        await update.message.reply_text(f"Item '{name}' tidak ditemukan dalam kategori '{category}'.")
+
+# Fungsi untuk menampilkan daftar kategori
+async def list_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not categories_data:
+        await update.message.reply_text("Tidak ada kategori yang tersedia.")
+    else:
+        categories_list = "\n".join([f"{category.capitalize()}: {len(items)} item(s)" for category, items in categories_data.items()])
+        await update.message.reply_text(f"Daftar Kategori:\n{categories_list}")
+
+# Fungsi untuk menangani command dinamis
+async def dynamic_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    command = update.message.text[1:].lower()  # Mengambil teks perintah tanpa '/'
+    
+    if command not in categories_data:
+        await update.message.reply_text(
+            f"Kategori '{escape_markdown_v2(command)}' tidak ditemukan.\n\n" +
+            "Kategori yang tersedia:\n" +
+            '\n'.join([f"/{escape_markdown_v2(cat)}" for cat in categories_data.keys()]),
+            parse_mode="MarkdownV2"
+        )
+        return
+
+    # Menyusun daftar item dari kategori
+    message = f"Daftar *{escape_markdown_v2(command.capitalize())}*:\n\n"
+    for item in categories_data[command]:
+        name = escape_markdown_v2(item['name'])
+        link = escape_markdown_v2(item['link'])
+        message += f"[{name}]({link})\n"
+
+    await update.message.reply_text(message, parse_mode="MarkdownV2")
+
+def main():
+    BOT_TOKEN = ""
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Handler untuk command /jarvis_add
+    app.add_handler(CommandHandler("jarvis_add", jarvis_add))
+
+    # Handler untuk command /list untuk menampilkan daftar kategori
+    app.add_handler(CommandHandler("list", list_categories))
+
+    # Handler untuk command /jarvis_remove untuk menghapus item
+    app.add_handler(CommandHandler("jarvis_remove", jarvis_remove))
+
+    # Handler untuk menangani semua command dinamis (misalnya /testnet, /retro, /bot)
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\/\w+"), dynamic_category))
+
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
